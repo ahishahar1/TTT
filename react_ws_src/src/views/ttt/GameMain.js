@@ -3,28 +3,22 @@ import React, {Component} from 'react'
 import io from 'socket.io-client'
 
 import TweenMax from 'gsap'
-
 import rand_arr_elem from '../../helpers/rand_arr_elem'
 import rand_to_fro from '../../helpers/rand_to_fro'
+import check_win_condition from '../../helpers/check_win_condition';
+import get_empty_cells from '../../helpers/get_empty_cells';
+import count_steps from '../../helpers/count_steps';
+
+const DIFFICULTY_MAP = {
+	beginner: 1,
+	contender: 2,
+	champion: 10
+}
 
 export default class SetName extends Component {
 
 	constructor (props) {
 		super(props)
-
-		this.win_sets = [
-			['c1', 'c2', 'c3'],
-			['c4', 'c5', 'c6'],
-			['c7', 'c8', 'c9'],
-
-			['c1', 'c4', 'c7'],
-			['c2', 'c5', 'c8'],
-			['c3', 'c6', 'c9'],
-
-			['c1', 'c5', 'c9'],
-			['c3', 'c5', 'c7']
-		]
-
 
 		if (this.props.game_type != 'live')
 			this.state = {
@@ -106,13 +100,11 @@ export default class SetName extends Component {
 //	------------------------	------------------------	------------------------
 
 	render () {
-		const { cell_vals } = this.state
-		// console.log(cell_vals)
 
 		return (
 			<div id='GameMain'>
 
-				<h1>Play {this.props.game_type}</h1>
+				<h1>Play {this.props.game_type} <span>{this.props.game_type === "comp" && "(" + this.props.game_difficulty + ")"}</span></h1>
 
 				<div id="game_stat">
 					<div id="game_stat_msg">{this.state.game_stat}</div>
@@ -142,6 +134,16 @@ export default class SetName extends Component {
 				</div>
 
 				<button type='submit' onClick={this.end_game.bind(this)} className='button'><span>End Game <span className='fa fa-caret-right'></span></span></button>
+
+				&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+
+				{this.state.game_type !== "live" 
+					&& (
+					<button type='submit' onClick={this.reset_game.bind(this)} className='button'>
+						<span>Reset Game <span className='fa fa-refresh'></span></span>
+					</button>
+					)
+				}
 
 			</div>
 		)
@@ -193,32 +195,35 @@ export default class SetName extends Component {
 
 	turn_comp () {
 
-		let { cell_vals } = this.state
-		let empty_cells_arr = []
+		let { cell_vals } = this.state;
 
+		const empty_cells = get_empty_cells(cell_vals);
 
-		for (let i=1; i<=9; i++) 
-			!cell_vals['c'+i] && empty_cells_arr.push('c'+i)
-		// console.log(cell_vals, empty_cells_arr, rand_arr_elem(empty_cells_arr))
+		const possible_turns = empty_cells.map((cell) => ({
+			cell,
+			steps: count_steps(Object.assign({}, cell_vals, { [cell]: "o" }), "x", DIFFICULTY_MAP[this.props.game_difficulty])
+		}))
 
-		const c = rand_arr_elem(empty_cells_arr)
-		cell_vals[c] = 'o'
+		const sorted_by_steps = possible_turns.sort((a, b) => 
+			a.steps < b.steps 
+				? -1
+				: a.steps > b.steps 
+					? 1
+					: 0
+		)
 
-		TweenMax.from(this.refs[c], 0.7, {opacity: 0, scaleX:0, scaleY:0, ease: Power4.easeOut})
+		const filtered_top_steps = sorted_by_steps.filter((c) => c.steps === sorted_by_steps[0].steps);
 
+		const c = rand_arr_elem(filtered_top_steps).cell;
+		cell_vals[c] = 'o';
 
-		// this.setState({
-		// 	cell_vals: cell_vals,
-		// 	next_turn_ply: true
-		// })
+		TweenMax.from(this.refs[c], 0.7, { opacity: 0, scaleX: 0, scaleY: 0, ease: Power4.easeOut });
 
-		this.state.cell_vals = cell_vals
+		this.setState(Object.assign({}, this.state, { cell_vals }));
 
-		this.check_turn()
+		this.check_turn();
 	}
 
-
-//	------------------------	------------------------	------------------------
 //	------------------------	------------------------	------------------------
 
 	turn_ply_live (cell_id) {
@@ -243,6 +248,7 @@ export default class SetName extends Component {
 		this.check_turn()
 	}
 
+//  ------------------------  ------------------------  ------------------------
 //	------------------------	------------------------	------------------------
 
 	turn_opp_live (data) {
@@ -267,35 +273,20 @@ export default class SetName extends Component {
 		this.check_turn()
 	}
 
-//	------------------------	------------------------	------------------------
-//	------------------------	------------------------	------------------------
+//  ------------------------  ------------------------  ------------------------
+//  ------------------------  ------------------------  ------------------------
 //	------------------------	------------------------	------------------------
 
 	check_turn () {
 
-		const { cell_vals } = this.state
-
-		let win = false
-		let set
-		let fin = true
+		const { cell_vals } = this.state;
 
 		if (this.props.game_type!='live')
 			this.state.game_stat = 'Play'
 
+		const set = check_win_condition(cell_vals)
 
-		for (let i=0; !win && i<this.win_sets.length; i++) {
-			set = this.win_sets[i]
-			if (cell_vals[set[0]] && cell_vals[set[0]]==cell_vals[set[1]] && cell_vals[set[0]]==cell_vals[set[2]])
-				win = true
-		}
-
-
-		for (let i=1; i<=9; i++) 
-			!cell_vals['c'+i] && (fin = false)
-
-		// win && console.log('win set: ', set)
-
-		if (win) {
+		if (set) {
 		
 			this.refs[set[0]].classList.add('win')
 			this.refs[set[1]].classList.add('win')
@@ -311,7 +302,7 @@ export default class SetName extends Component {
 
 			this.socket && this.socket.disconnect();
 
-		} else if (fin) {
+		} else if (!get_empty_cells(cell_vals).length) {
 		
 			this.setState({
 				game_stat: 'Draw',
@@ -337,7 +328,30 @@ export default class SetName extends Component {
 
 		this.props.onEndGame()
 	}
+	
+//	------------------------	------------------------	------------------------
 
+	reset_game () {
 
+		const { cell_vals } = this.state;
+
+		const set = check_win_condition(cell_vals);
+
+		if (set) {
+			this.refs[set[0]].classList.remove('win');
+			this.refs[set[1]].classList.remove('win');
+			this.refs[set[2]].classList.remove('win');
+	
+			TweenMax.killAll(true)
+			TweenMax.from('td.win', 1, {opacity: 0, ease: Linear.easeIn})
+		}
+
+		this.setState({
+			cell_vals: {},
+			next_turn_ply: true,
+			game_play: true,
+			game_stat: 'Start game'
+		});
+	}
 
 }
